@@ -165,6 +165,29 @@ describe('FocusScope', () => {
     });
   });
 
+  describe('given a trapped FocusScope and an outside element that refocuses itself on blur', () => {
+    it('reclaims focus once instead of recursing', () => {
+      const rendered = render(
+        <div>
+          <FocusScope.Root trapped>
+            <button>{INNER_SUBMIT_LABEL}</button>
+          </FocusScope.Root>
+          <input aria-label="outside-input" onBlur={(event) => event.currentTarget.focus()} />
+        </div>,
+      );
+      const inner = rendered.getByText(INNER_SUBMIT_LABEL);
+      const outsideInput = rendered.getByLabelText('outside-input') as HTMLInputElement;
+      // jsdom reports errors thrown by event listeners on `window` instead of rethrowing them
+      const handleError = vi.fn((event: ErrorEvent) => event.preventDefault());
+      window.addEventListener('error', handleError);
+      inner.focus();
+      outsideInput.focus();
+      window.removeEventListener('error', handleError);
+      expect(handleError).not.toHaveBeenCalled();
+      expect(inner).toHaveFocus();
+    });
+  });
+
   describe('given a FocusScope with internal focus handlers', () => {
     const handleLastFocusableElementBlur = vi.fn();
     let rendered: RenderResult;

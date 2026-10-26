@@ -100,13 +100,27 @@ const FocusScope = /* @__PURE__ */ React.forwardRef<FocusScopeElement, FocusScop
     // Takes care of trapping focus if focus is moved outside programmatically for example
     React.useEffect(() => {
       if (trapped) {
+        // Restoring focus blurs the outside element, and its own `blur` handler may move focus
+        // straight back out. Ignore the focus events our restoration causes so the two can't
+        // recurse until the stack overflows.
+        let isRestoringFocus = false;
+        function restoreFocus() {
+          if (isRestoringFocus) return;
+          isRestoringFocus = true;
+          try {
+            focus(lastFocusedElementRef.current, { select: true });
+          } finally {
+            isRestoringFocus = false;
+          }
+        }
+
         function handleFocusIn(event: FocusEvent) {
           if (focusScope.paused || !container) return;
           const target = event.target as HTMLElement | null;
           if (isTargetInScope(target)) {
             lastFocusedElementRef.current = target;
           } else {
-            focus(lastFocusedElementRef.current, { select: true });
+            restoreFocus();
           }
         }
 
@@ -134,7 +148,7 @@ const FocusScope = /* @__PURE__ */ React.forwardRef<FocusScopeElement, FocusScop
           // registered branches), we move focus to the last valid focused
           // element inside.
           if (!isTargetInScope(relatedTarget)) {
-            focus(lastFocusedElementRef.current, { select: true });
+            restoreFocus();
           }
         }
 
