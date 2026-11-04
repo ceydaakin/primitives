@@ -1,4 +1,5 @@
 import * as React from 'react';
+import * as ReactDOM from 'react-dom';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertStableComposedRef } from '@repo/test-utils/ref-stability';
@@ -815,3 +816,71 @@ function cleanupLayer() {
   // A layer that disables outside pointer events sets this on the `body`.
   document.body.style.pointerEvents = '';
 }
+
+// See https://github.com/radix-ui/primitives/issues/4268
+describe('given a deferred pointer down outside when the layer unmounts', () => {
+  afterEach(cleanup);
+
+  function LayerUnmountedByOutsideClick({
+    onPointerDownOutside,
+  }: {
+    onPointerDownOutside: () => void;
+  }) {
+    const [isOpen, setIsOpen] = React.useState(true);
+    return (
+      <>
+        {isOpen ? (
+          <DismissableLayer.Root
+            deferPointerDownOutside
+            onPointerDownOutside={onPointerDownOutside}
+          >
+            <button type="button">inside</button>
+          </DismissableLayer.Root>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => {
+            // In a browser, React commits a click's update in a microtask that
+            // runs before the click reaches the document. Flush synchronously
+            // to get the same order here.
+            ReactDOM.flushSync(() => setIsOpen(false));
+          }}
+        >
+          outside
+        </button>
+      </>
+    );
+  }
+
+  it('reports the outside interaction when the awaited click unmounts the layer', async () => {
+    const onPointerDownOutside = vi.fn();
+    render(<LayerUnmountedByOutsideClick onPointerDownOutside={onPointerDownOutside} />);
+    await waitForDocumentPointerDownListener();
+
+    await act(async () => {
+      firePointerMouseClick(screen.getByText('outside'));
+    });
+
+    expect(screen.queryByText('inside')).not.toBeInTheDocument();
+    expect(onPointerDownOutside).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report the outside interaction when the click comes after the layer unmounted', async () => {
+    const onPointerDownOutside = vi.fn();
+    const rendered = renderDismissableLayer({
+      deferPointerDownOutside: true,
+      onPointerDownOutside,
+    });
+    await waitForDocumentPointerDownListener();
+
+    fireEvent.pointerDown(screen.getByText('outside'), { pointerType: 'touch' });
+    rendered.rerender(<button type="button">outside</button>);
+    await waitForDocumentPointerDownListener();
+
+    await act(async () => {
+      fireEvent.click(screen.getByText('outside'));
+    });
+
+    expect(onPointerDownOutside).not.toHaveBeenCalled();
+  });
+});

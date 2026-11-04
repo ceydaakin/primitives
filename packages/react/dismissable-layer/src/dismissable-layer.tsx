@@ -354,6 +354,7 @@ function usePointerDownOutside(
 
   React.useEffect(() => {
     let isListening = true;
+    let deferredPointerDownOutsideEventDetail: { originalEvent: PointerEvent } | null = null;
     const timers = new Set<number>();
     function resetOutsideInteraction() {
       isPointerDownOutsideRef.current = false;
@@ -363,6 +364,14 @@ function usePointerDownOutside(
 
     function isOutsideInteractionIntercepted() {
       return Array.from(interceptedOutsideInteractionEventsRef.current.values()).some(Boolean);
+    }
+
+    // A click that is still on its way to the document has only been seen by
+    // the capture listener, so only the events before it count
+    function isOutsideInteractionInterceptedBeforeClick() {
+      return Array.from(interceptedOutsideInteractionEventsRef.current).some(
+        ([eventType, wasIntercepted]) => eventType !== 'click' && wasIntercepted,
+      );
     }
 
     function handleInteractionCapture(event: Event) {
@@ -455,6 +464,7 @@ function usePointerDownOutside(
           handleAndDispatchPointerDownOutsideEvent();
         } else {
           ownerDocument.removeEventListener('click', handleClickRef.current);
+          deferredPointerDownOutsideEventDetail = eventDetail;
           handleClickRef.current = (event: Event) => {
             if (event.isTrusted) {
               handleAndDispatchPointerDownOutsideEvent();
@@ -515,6 +525,12 @@ function usePointerDownOutside(
     timers.add(timerId);
     return () => {
       isListening = false;
+      const pendingPointerDownOutsideEventDetail =
+        isPointerDownOutsideRef.current &&
+        isDeferredPointerDownOutsideRef.current &&
+        !isOutsideInteractionInterceptedBeforeClick()
+          ? deferredPointerDownOutsideEventDetail
+          : null;
       resetOutsideInteraction();
       for (const timerId of timers) {
         window.clearTimeout(timerId);
@@ -524,6 +540,44 @@ function usePointerDownOutside(
       for (const eventName of outsideInteractionEvents) {
         ownerDocument.removeEventListener(eventName, handleInteractionCapture, true);
         ownerDocument.removeEventListener(eventName, handleInteractionBubble);
+      }
+
+      /**
+       * The click we were waiting for may be the one that unmounts this layer,
+       * e.g. a sibling trigger that swaps a shared controlled `open` state.
+       * React handles that click before it reaches the document, so still
+       * report the outside interaction when the click lands in this task.
+       * Otherwise consumers think nothing happened outside and return focus
+       * to their trigger, dismissing the layer that just opened.
+       * See https://github.com/radix-ui/primitives/issues/4268
+       */
+      if (pendingPointerDownOutsideEventDetail) {
+        const eventDetail = pendingPointerDownOutsideEventDetail;
+        const dispatchPointerDownOutsideEvent = () => {
+          handleAndDispatchCustomEvent(
+            POINTER_DOWN_OUTSIDE,
+            handlePointerDownOutside,
+            eventDetail,
+            {
+              discrete: true,
+            },
+          );
+        };
+        const handlePendingClick = (event: Event) => {
+          window.clearTimeout(expireTimerId);
+          if (event.isTrusted) {
+            dispatchPointerDownOutsideEvent();
+          } else {
+            // Programmatic clicks can fire during a React commit, where
+            // flushSync is not allowed.
+            // See https://github.com/radix-ui/primitives/issues/4121
+            queueMicrotask(dispatchPointerDownOutsideEvent);
+          }
+        };
+        const expireTimerId = window.setTimeout(() => {
+          ownerDocument.removeEventListener('click', handlePendingClick);
+        }, 0);
+        ownerDocument.addEventListener('click', handlePendingClick, { once: true });
       }
     };
   }, [

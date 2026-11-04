@@ -1,6 +1,7 @@
 import * as React from 'react';
+import * as ReactDOM from 'react-dom';
 import type { RenderResult } from '@testing-library/react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import * as Popover from './popover';
 
@@ -741,5 +742,75 @@ describe('handlers with a narrower parameter type than the prop', () => {
     fireEvent.click(screen.getByText(TRIGGER_TEXT));
 
     expect(handleOpenChange).toHaveBeenCalledWith(true);
+  });
+});
+
+// Regression test for https://github.com/radix-ui/primitives/issues/4268
+describe('given sibling popovers that share one controlled open state', () => {
+  afterEach(cleanup);
+
+  function SiblingPopover({
+    id,
+    openId,
+    onOpenIdChange,
+  }: {
+    id: string;
+    openId: string | null;
+    onOpenIdChange: (openId: string | null) => void;
+  }) {
+    return (
+      <Popover.Root
+        open={openId === id}
+        onOpenChange={(isOpen) => {
+          // In a browser, React commits a click's update in a microtask that
+          // runs before the click reaches the document. Flush synchronously to
+          // get the same order here.
+          ReactDOM.flushSync(() => onOpenIdChange(isOpen ? id : null));
+        }}
+      >
+        <Popover.Trigger>Open {id}</Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content>Content {id}</Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+    );
+  }
+
+  function SiblingPopovers() {
+    const [openId, setOpenId] = React.useState<string | null>(null);
+    return (
+      <>
+        <SiblingPopover id="A" openId={openId} onOpenIdChange={setOpenId} />
+        <SiblingPopover id="B" openId={openId} onOpenIdChange={setOpenId} />
+      </>
+    );
+  }
+
+  async function flushTimers() {
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+  }
+
+  it('keeps the second popover open when its trigger is clicked while the first is open', async () => {
+    render(<SiblingPopovers />);
+
+    fireEvent.click(screen.getByText('Open A'));
+    expect(screen.getByText('Content A')).toBeInTheDocument();
+    // DismissableLayer registers its document `pointerdown` listener on a timer
+    await flushTimers();
+
+    const triggerB = screen.getByText('Open B');
+    fireEvent.pointerDown(triggerB, { button: 0 });
+    fireEvent.mouseDown(triggerB, { button: 0 });
+    act(() => triggerB.focus());
+    fireEvent.pointerUp(triggerB, { button: 0 });
+    fireEvent.mouseUp(triggerB, { button: 0 });
+    fireEvent.click(triggerB, { button: 0 });
+    // Let the first popover's unmount auto-focus run
+    await flushTimers();
+
+    expect(screen.queryByText('Content A')).not.toBeInTheDocument();
+    expect(screen.getByText('Content B')).toBeInTheDocument();
   });
 });
