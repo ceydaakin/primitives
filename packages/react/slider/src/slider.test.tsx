@@ -280,6 +280,94 @@ describe('Slider', () => {
     });
   });
 
+  describe('given a range slider, when pressing Home or End', () => {
+    it('moves the focused second thumb to the start when pressing Home', async () => {
+      const user = userEvent.setup();
+      render(
+        <Slider.Root defaultValue={[20, 80]} min={0} max={100} step={10}>
+          <Slider.Track>
+            <Slider.Range />
+          </Slider.Track>
+          <Slider.Thumb />
+          <Slider.Thumb />
+        </Slider.Root>,
+      );
+
+      const thumbs = screen.getAllByRole('slider');
+      thumbs[1]!.focus();
+      await user.keyboard('{Home}');
+
+      // The second thumb moves to 0 and crosses the first thumb, which keeps its value.
+      expect(getThumbValues()).toEqual([0, 20]);
+      expect(thumbs[0]).toHaveFocus();
+    });
+
+    it('moves the focused first thumb to the end when pressing End', async () => {
+      const user = userEvent.setup();
+      render(
+        <Slider.Root defaultValue={[20, 80]} min={0} max={100} step={10}>
+          <Slider.Track>
+            <Slider.Range />
+          </Slider.Track>
+          <Slider.Thumb />
+          <Slider.Thumb />
+        </Slider.Root>,
+      );
+
+      const thumbs = screen.getAllByRole('slider');
+      thumbs[0]!.focus();
+      await user.keyboard('{End}');
+
+      // The first thumb moves to 100 and crosses the second thumb, which keeps its value.
+      expect(getThumbValues()).toEqual([80, 100]);
+      expect(thumbs[1]).toHaveFocus();
+    });
+
+    it('stops the focused thumb at its neighbour when `preserveThumbOrder` is set', async () => {
+      const user = userEvent.setup();
+      render(
+        <Slider.Root defaultValue={[20, 80]} min={0} max={100} step={10} preserveThumbOrder={true}>
+          <Slider.Track>
+            <Slider.Range />
+          </Slider.Track>
+          <Slider.Thumb />
+          <Slider.Thumb />
+        </Slider.Root>,
+      );
+
+      const thumbs = screen.getAllByRole('slider');
+      thumbs[1]!.focus();
+      await user.keyboard('{Home}');
+      expect(getThumbValues()).toEqual([20, 20]);
+      expect(thumbs[1]).toHaveFocus();
+
+      thumbs[0]!.focus();
+      await user.keyboard('{End}');
+      expect(getThumbValues()).toEqual([20, 20]);
+      expect(thumbs[0]).toHaveFocus();
+    });
+
+    it('moves the focused first thumb to the start when pressing Home', async () => {
+      const user = userEvent.setup();
+      render(
+        <Slider.Root defaultValue={[20, 80]} min={0} max={100} step={10}>
+          <Slider.Track>
+            <Slider.Range />
+          </Slider.Track>
+          <Slider.Thumb />
+          <Slider.Thumb />
+        </Slider.Root>,
+      );
+
+      const thumbs = screen.getAllByRole('slider');
+      thumbs[0]!.focus();
+      await user.keyboard('{Home}');
+
+      expect(getThumbValues()).toEqual([0, 80]);
+      expect(thumbs[0]).toHaveFocus();
+    });
+  });
+
   describe('within a form that is reset', () => {
     function renderSliderInForm(props: React.ComponentProps<typeof Slider.Root>) {
       return render(
